@@ -1,0 +1,68 @@
+version: '3.3'
+volumes:
+  certdata:
+  vhostdata:
+services:
+  swaggerui:
+    image: swaggerapi/swagger-ui:v3.42.0
+    environment:
+      SWAGGER_JSON_URL: https://cherrypyapp.localdomain/v1/swagger.yaml
+      VIRTUAL_HOST: swaggerui.localdomain
+      VIRTUAL_PORT: 8080
+  keycloak:
+    image: jboss/keycloak:12.0.2
+    environment:
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: admin
+      PROXY_ADDRESS_FORWARDING: 'true'
+      KEYCLOAK_FRONTEND_URL: https://keycloak.localdomain/auth
+      VIRTUAL_HOST: keycloak.localdomain
+      VIRTUAL_PORT: 8080
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  certinfra:
+    build:
+      context: certinfra
+    volumes:
+      - certdata:/certdata
+      - vhostdata:/vhostdata
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  cherrypy:
+    build:
+      context: cherrypy
+    depends_on:
+      certinfra:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    volumes:
+      - certdata:/certdata
+    links:
+      - proxy:keycloak.localdomain
+    environment:
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: admin
+      KEYCLOAK_HOST: keycloak.localdomain
+      KEYCLOAK_LIVE_HOST: keycloak
+      KEYCLOAK_LIVE_PORT: 8080
+      VIRTUAL_HOST: cherrypyapp.localdomain
+      VIRTUAL_PORT: 8080
+  proxy:
+    image: jwilder/nginx-proxy:0.8.0
+    depends_on:
+      certinfra:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - certdata:/etc/nginx/certs
+      - vhostdata:/etc/nginx/vhost.d
+    ports:
+      - 80:80
+      - 443:443

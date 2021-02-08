@@ -1,0 +1,29 @@
+---
+openapi: '3.0.0'
+components:
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://keycloak.localdomain/auth/realms/master/protocol/openid-connect/auth
+          tokenUrl: https://keycloak.localdomain/auth/realms/master/protocol/openid-connect/token
+          scopes:
+            profile: user profile
+            email: user email
+            roles: user roles
+            phone: user phone number
+            address: user address
+security:
+  - OAuth2:
+      - profile
+      - email
+      - roles
+
+paths:
+  /v1:
+    get:
+      summary: Gets a UUID
+      responses:
+        '200':
+          description: OK

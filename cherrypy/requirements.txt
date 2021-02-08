@@ -1,0 +1,6 @@
+cherrypy
+cryptography
+social-auth-core
+social-auth-app-cherrypy
+pacifica-auth
+ansible

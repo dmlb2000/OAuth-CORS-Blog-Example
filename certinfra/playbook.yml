@@ -1,0 +1,75 @@
+---
+- name: Setup SSL Certs
+  hosts: localhost
+  roles:
+    - role: pacifica.ansible_certinfra
+      vars:
+        install_packages: false
+        private_key_dir: /certdata/.CA/private
+        cert_dir: /certdata/.CA/certs
+        trust_chain_dir: /usr/local/share/ca-certificates
+        update_trusted_ca_command: update-ca-certificates --fresh
+        servers:
+          - name: localhost.localdomain
+            subject_alt_name:
+              - 'IP:127.0.0.1'
+              - 'DNS:localhost.localdomain'
+              - 'DNS:localhost'
+          - name: cherrypyapp.localdomain
+            subject_alt_name:
+              - 'IP:127.0.0.1'
+              - 'DNS:cherrypyapp.localdomain'
+              - 'DNS:cherrypyapp'
+          - name: keycloak.localdomain
+            subject_alt_name:
+              - 'IP:127.0.0.1'
+              - 'DNS:keycloak.localdomain'
+              - 'DNS:keycloak'
+          - name: swaggerui.localdomain
+            subject_alt_name:
+              - 'IP:127.0.0.1'
+              - 'DNS:swaggerui.localdomain'
+              - 'DNS:swaggerui'
+  post_tasks:
+    - name: Slurp the Pacifica Cert Chain
+      slurp:
+        src: /certdata/.CA/certs/pacifica_chain.io.crt
+      register: pacifica_cert_chain
+    - name: Copy Cert Chain
+      copy:
+        src: "/certdata/.CA/certs/pacifica_{{ item }}.io.crt"
+        dest: "/certdata/pacifica_{{ item }}.io.crt"
+        owner: root
+        group: root
+        mode: 0644
+      loop:
+        - root_ca
+        - chain
+    - name: Copy Keys
+      copy:
+        src: /certdata/.CA/private/{{ item }}.pem
+        dest: /certdata/{{ item }}.key
+        owner: root
+        group: root
+        mode: 0644
+      loop:
+        - cherrypyapp.localdomain
+        - keycloak.localdomain
+        - swaggerui.localdomain
+    - name: Slurp the vhosts certs
+      slurp:
+        src: /certdata/.CA/certs/{{ item }}.crt
+      register: vhost_certs
+      loop:
+        - cherrypyapp.localdomain
+        - keycloak.localdomain
+        - swaggerui.localdomain
+    - name: Copy Certs
+      copy:
+        content: |
+          {{ item.content | b64decode }}{{ pacifica_cert_chain.content | b64decode }}
+        dest: /certdata/{{ item.item }}.crt
+        owner: root
+        group: root
+        mode: 0644
+      loop: "{{ vhost_certs.results }}"

@@ -1,0 +1,122 @@
+---
+- name: Setup Keycloak
+  hosts: localhost
+  vars:
+    keycloak_base_url: "https://{{ lookup('env', 'KEYCLOAK_HOST') }}/auth"
+    keycloak_auth_realm: master
+    keycloak_auth_username: "{{ lookup('env', 'KEYCLOAK_USER') }}"
+    keycloak_auth_password: "{{ lookup('env', 'KEYCLOAK_PASSWORD') }}"
+    keycloak_auth_url: "{{ keycloak_base_url }}/realms/{{ keycloak_auth_realm }}/protocol/openid-connect/auth"
+    keycloak_token_url: "{{ keycloak_base_url }}/realms/{{ keycloak_auth_realm }}/protocol/openid-connect/token"
+    keycloak_userinfo_url: "{{ keycloak_base_url }}/realms/{{ keycloak_auth_realm }}/protocol/openid-connect/userinfo"
+    keycloak_client_id: cherrypyapp
+    keycloak_client_secret: "{{ inventory_hostname | to_uuid }}"
+    keycloak_description: This client is used with CherryPy Social Auth.
+    keycloak_redirect_uris:
+      - https://cherrypyapp.localdomain/*
+      - https://swaggerui.localdomain/*
+    keycloak_web_origins:
+      - https://cherrypyapp.localdomain
+      - https://swaggerui.localdomain
+  pre_tasks:
+    - name: Assert they were set to something
+      assert:
+        that:
+          - (keycloak_auth_username | length) > 0
+          - (keycloak_auth_password | length) > 0
+          - (keycloak_base_url | length) > 13
+    - name: Verify Keycloak Url
+      uri:
+        url: "{{ keycloak_base_url }}"
+      register: keycloak_verify_result
+      failed_when: "keycloak_verify_result.status is undefined or keycloak_verify_result.status != 200"
+  tasks:
+    - name: Create a Keycloak Client for Drupal
+      keycloak_client:
+        auth_keycloak_url: "{{ keycloak_base_url }}"
+        auth_realm: "{{ keycloak_auth_realm }}"
+        auth_username: "{{ keycloak_auth_username }}"
+        auth_password: "{{ keycloak_auth_password }}"
+        client_id: "{{ keycloak_client_id }}"
+        state: present
+    - name: Set the Protocol Mappers for the client
+      keycloak_client:
+        auth_keycloak_url: "{{ keycloak_base_url }}"
+        auth_realm: "{{ keycloak_auth_realm }}"
+        auth_username: "{{ keycloak_auth_username }}"
+        auth_password: "{{ keycloak_auth_password }}"
+        client_id: "{{ keycloak_client_id }}"
+        secret: "{{ keycloak_client_secret }}"
+        description: "{{ keycloak_description }}"
+        redirect_uris: "{{ keycloak_redirect_uris }}"
+        web_origins: "{{ keycloak_web_origins }}"
+        protocol_mappers:
+          - name: "{{ keycloak_client_id }}"
+            protocol: openid-connect
+            protocolMapper: oidc-audience-mapper
+            config:
+              included.client.audience: "{{ keycloak_client_id }}"
+              id.token.claim: true
+              access.token.claim: true
+              included.custom.audience: "{{ keycloak_client_id }}"
+        state: present
+    - name: Get Public Key
+      uri:
+        url: "{{ keycloak_base_url }}/realms/{{ keycloak_auth_realm }}"
+        return_content: yes
+        headers:
+          accept: application/json
+      register: keycloak_verify_result
+      failed_when: "keycloak_verify_result.status is undefined or keycloak_verify_result.status != 200"
+    - name: Debug Body
+      debug:
+        msg: "{{ keycloak_verify_result.content | from_json }}"
+  post_tasks:
+    - name: Create sessions directory
+      file:
+        path: /app/sessions
+        state: directory
+        owner: root
+        group: root
+        mode: 0755
+    - name: Create the config file
+      file:
+        path: config.ini
+        state: touch
+        mode: 0644
+    - name: Set the CherryPy Configs
+      ini_file:
+        path: config.ini
+        section: cherrypy
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+        mode: 0644
+      loop:
+        - option: session_dir
+          value: /app/sessions
+        - option: app_dir
+          value: /app
+        - option: social_module
+          value: keycloak
+        - option: social_class
+          value: KeycloakOAuth2
+    - name: Set the Keycloak Configs
+      ini_file:
+        path: config.ini
+        section: social_settings
+        option: "keycloak_{{ item.option }}"
+        value: "{{ item.value }}"
+        mode: 0644
+      loop:
+        - option: key
+          value: "{{ keycloak_client_id }}"
+        - option: secret
+          value: "{{ keycloak_client_secret }}"
+        - option: public_key
+          value: "{{ (keycloak_verify_result.content | from_json).public_key }}"
+        - option: authorization_url
+          value: "{{ keycloak_auth_url }}"
+        - option: access_token_url
+          value: "{{ keycloak_token_url }}"
+        - option: userinfo_url
+          value: "{{ keycloak_userinfo_url }}"
